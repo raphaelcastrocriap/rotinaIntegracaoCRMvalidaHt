@@ -218,7 +218,7 @@
         "Product"
         {
         "Name" = "8:Microsoft Visual Studio"
-        "ProductName" = "8:EMAIL_IntegracaoInscricoesDoHtParaEgoi"
+        "ProductName" = "8:EMAIL_RotinaIntegracaoCRMvalidaHt"
         "ProductCode" = "8:{48B67369-34A8-4E3D-916B-BADADF08EB62}"
         "PackageCode" = "8:{CD9104BE-0F5D-4009-B578-DF2EE366F4B0}"
         "UpgradeCode" = "8:{F11B87C3-7A17-4E2F-9DD8-E898D14C4D00}"
@@ -741,7 +741,7 @@
         {
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_95E772B5D9974DDFA6081C169FC5F86A"
             {
-            "SourcePath" = "8:..\\IntegracaoInscricoesDoHtParaEgoi\\obj\\Debug\\IntegracaoInscricoesDoHtParaEgoi.exe"
+            "SourcePath" = "8:..\\RotinaIntegracaoCRMvalidaHt\\obj\\Debug\\RotinaIntegracaoCRMvalidaHt.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_2575CA86DB064DD29A0FFDBFDEE28D56"

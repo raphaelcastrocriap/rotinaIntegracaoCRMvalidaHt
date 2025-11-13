@@ -8,13 +8,13 @@ using System.Net;
 using System.Text;
 using System.Reflection;
 using System.Linq;
-using IntegracaoInscricoesDoHtParaEgoi.Properties;
+using RotinaIntegracaoCRMvalidaHt.Properties;
 using System.IO;
-using IntegracaoInscricoesDoHtParaEgoi.Connects;
+using RotinaIntegracaoCRMvalidaHt.Connects;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
-using static IntegracaoInscricoesDoHtParaEgoi.Model.Models;
+using static RotinaIntegracaoCRMvalidaHt.Model.Models;
 using Newtonsoft.Json.Linq;
 using MySqlX.XDevAPI;
 using System.Text.RegularExpressions;
@@ -22,7 +22,7 @@ using DocumentFormat.OpenXml.Vml.Office;
 using static Org.BouncyCastle.Math.EC.ECCurve;
 
 
-namespace IntegracaoInscricoesDoHtParaEgoi
+namespace RotinaIntegracaoCRMvalidaHt
 {
     public partial class Form1 : Form
     {

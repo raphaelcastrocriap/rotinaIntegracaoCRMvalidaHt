@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace IntegracaoInscricoesDoHtParaEgoi.Model
+namespace RotinaIntegracaoCRMvalidaHt.Model
 {
     public class Models
     {

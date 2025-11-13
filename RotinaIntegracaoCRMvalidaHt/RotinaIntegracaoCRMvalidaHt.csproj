@@ -7,8 +7,8 @@
     <ProjectGuid>{3D007527-C5CF-4974-8276-0E6245F45318}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>IntegracaoInscricoesDoHtParaEgoi</RootNamespace>
-    <AssemblyName>IntegracaoInscricoesDoHtParaEgoi</AssemblyName>
+    <RootNamespace>RotinaIntegracaoCRMvalidaHt</RootNamespace>
+    <AssemblyName>RotinaIntegracaoCRMvalidaHt</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

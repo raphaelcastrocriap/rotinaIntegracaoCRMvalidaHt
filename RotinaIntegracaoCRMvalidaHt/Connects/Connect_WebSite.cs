@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace IntegracaoInscricoesDoHtParaEgoi.Connects
+namespace RotinaIntegracaoCRMvalidaHt.Connects
 {
     class Connect_WebSite
     {

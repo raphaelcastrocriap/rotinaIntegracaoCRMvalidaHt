@@ -1,4 +1,4 @@
-﻿namespace IntegracaoInscricoesDoHtParaEgoi
+﻿namespace RotinaIntegracaoCRMvalidaHt
 {
     partial class Form1
     {

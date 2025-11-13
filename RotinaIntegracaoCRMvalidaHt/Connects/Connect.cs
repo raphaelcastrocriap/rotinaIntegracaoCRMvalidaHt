@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace IntegracaoInscricoesDoHtParaEgoi.Connects
+namespace RotinaIntegracaoCRMvalidaHt.Connects
 {
     class Connect
     {

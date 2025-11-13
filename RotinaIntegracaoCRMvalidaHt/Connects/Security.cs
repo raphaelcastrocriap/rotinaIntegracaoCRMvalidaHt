@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace IntegracaoInscricoesDoHtParaEgoi.Connects
+namespace RotinaIntegracaoCRMvalidaHt.Connects
 {
     class Security
     {
