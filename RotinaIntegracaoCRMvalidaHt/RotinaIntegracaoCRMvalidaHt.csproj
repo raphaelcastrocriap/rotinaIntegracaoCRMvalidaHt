@@ -246,6 +246,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Connects\Connect.cs" />
+    <Compile Include="Connects\Connect_CRM_Server.cs" />
     <Compile Include="Connects\Connect_HT_server.cs" />
     <Compile Include="Connects\Connect_Moodle_Server.cs" />
     <Compile Include="Connects\Connect_WebSite.cs" />

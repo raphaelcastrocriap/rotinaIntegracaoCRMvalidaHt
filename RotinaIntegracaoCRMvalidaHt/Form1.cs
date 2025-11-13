@@ -3,23 +3,18 @@ using System.Collections.Generic;
 using System.Data;
 using System.Windows.Forms;
 using System.Data.SqlClient;
+using MySql.Data.MySqlClient;
 using System.Net.Mail;
 using System.Net;
 using System.Text;
 using System.Reflection;
 using System.Linq;
 using RotinaIntegracaoCRMvalidaHt.Properties;
-using System.IO;
 using RotinaIntegracaoCRMvalidaHt.Connects;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using static RotinaIntegracaoCRMvalidaHt.Model.Models;
-using Newtonsoft.Json.Linq;
-using MySqlX.XDevAPI;
-using System.Text.RegularExpressions;
-using DocumentFormat.OpenXml.Vml.Office;
-using static Org.BouncyCastle.Math.EC.ECCurve;
 
 
 namespace RotinaIntegracaoCRMvalidaHt
@@ -31,7 +26,9 @@ namespace RotinaIntegracaoCRMvalidaHt
         public string data;
         public string versao;
         
-        List<Relatorio> listFormadoresNotificados = new List<Relatorio>();
+        List<RelatorioLead> listLeadsValidados = new List<RelatorioLead>();
+        DateTime periodoInicio;
+        DateTime periodoFim;
 
         
         public Form1()
@@ -41,7 +38,7 @@ namespace RotinaIntegracaoCRMvalidaHt
         }
         private async void Form1_Load(object sender, EventArgs e)
         {
-            teste = false;
+            teste = true;
 
             Security.remote();
             Version v = Assembly.GetExecutingAssembly().GetName().Version;
@@ -50,10 +47,10 @@ namespace RotinaIntegracaoCRMvalidaHt
 
             string[] passedInArgs = Environment.GetCommandLineArgs();
 
-            if (passedInArgs.Contains("-a") || passedInArgs.Contains("-A"))
+            if (passedInArgs.Contains("-v") || passedInArgs.Contains("-V"))
             {
                 Cursor.Current = Cursors.WaitCursor;
-                await EnviarEmailLembreteAulaFormadoresAsync();
+                await ValidarLeadsCRMAsync();
                 Cursor.Current = Cursors.Default;
                 System.Windows.Forms.Application.Exit();
             }
@@ -62,171 +59,185 @@ namespace RotinaIntegracaoCRMvalidaHt
         private async void button1_Click(object sender, EventArgs e)
         {
             Cursor.Current = Cursors.WaitCursor;
-            await EnviarEmailLembreteAulaFormadoresAsync();
+            await ValidarLeadsCRMAsync();
             Cursor.Current = Cursors.Default;
         }
-        
-        private async Task EnviarEmailLembreteAulaFormadoresAsync()
+
+
+        private async Task ValidarLeadsCRMAsync()
         {
             try
             {
-                Connect.HTlocalConnect.ConnInit();
+                // Data de início da rotina
+                DateTime dataInicio = DateTime.Now;
 
-                DateTime dataRotina = DateTime.Now.AddDays(-1);
+                Connect.CRMConnect.ConnInit();
 
-                string queryFormandos = $@"
-                       SELECT 
-                            f.Codigo_Formando, 
-                            f.Nome_Abreviado, 
-                            f.Data_Nascimento, 
-                            c.Email1, 
-                            c.Telefone1, 
-                            i.Data_Inscricao, 
-                            i.versao_data as Data_Inscricaorowid
-                        FROM TBForFormandos f 
-                        LEFT JOIN TBForInscricoes i ON f.Codigo_Formando = i.Codigo_Formando 
-                        LEFT JOIN TBForAccoes a ON i.Rowid_Accao = a.versao_rowid 
-                        INNER JOIN TBGerContactos c ON f.versao_rowid = c.Codigo_Entidade AND c.Tipo_Entidade=3
-                        WHERE i.Data_Inscricao = '{dataRotina.ToString("yyyy-MM-dd")}';
-                        ";
+                // Query para buscar a última data de execução
+                string queryUltimaExecucao = @"
+                    SELECT MAX(ultima_data_execucao) AS ultima_data_execucao 
+                    FROM log_controle_rotina 
+                    WHERE nome_rotina = 'rotina_validacao_ht_crm'";
 
-                SqlDataAdapter adapterFormandos = new SqlDataAdapter(queryFormandos, Connect.HTlocalConnect.Conn);
-                DataTable dataTableFormandos = new DataTable();
-                adapterFormandos.Fill(dataTableFormandos);
-                var inscricoes = dataTableFormandos.AsEnumerable().Select(row => new Formador
+                MySqlCommand cmdUltimaExecucao = new MySqlCommand(queryUltimaExecucao, Connect.CRMConnect.Conn);
+                object result = cmdUltimaExecucao.ExecuteScalar();
+                
+                DateTime ultimaExecucao = result != null && result != DBNull.Value 
+                    ? Convert.ToDateTime(result) 
+                    : DateTime.Now.AddDays(-30); // Se não houver registro, buscar últimos 30 dias
+
+                // Armazenar o período para o relatório
+                periodoInicio = ultimaExecucao;
+                periodoFim = dataInicio;
+
+                // Query para buscar leads novos/modificados
+                string queryLeads = $@"
+                    SELECT l.id, l.date_entered, l.date_modified, l.modified_user_id, l.description, l.deleted, 
+                           ea.email_address, CONCAT_WS(' ', l.first_name, l.last_name) AS nome_completo, 
+                           COALESCE(l.phone_mobile, l.phone_home, l.phone_work) AS phone, l.lead_source, 
+                           l.lead_source_description, l.status, l.status_description
+                    FROM leads l
+                    LEFT JOIN email_addr_bean_rel ebr ON ebr.bean_id = l.id AND ebr.bean_module = 'Leads'
+                    LEFT JOIN email_addresses ea ON ea.id = ebr.email_address_id
+                    WHERE l.deleted = 0 
+                      AND l.date_entered >= '{ultimaExecucao:yyyy-MM-dd HH:mm:ss}' 
+                      AND l.date_entered <= '{dataInicio:yyyy-MM-dd HH:mm:ss}'";
+
+                MySqlDataAdapter adapterLeads = new MySqlDataAdapter(queryLeads, Connect.CRMConnect.Conn);
+                DataTable dataTableLeads = new DataTable();
+                adapterLeads.Fill(dataTableLeads);
+
+                var leads = dataTableLeads.AsEnumerable().Select(row => new Lead
                 {
-                    CodigoFormando = row["Codigo_Formando"].ToString(),
-                    NomeAbreviado = row["Nome_Abreviado"].ToString(),
-                    DataNascimento = DateTime.TryParse(row["Data_Nascimento"]?.ToString(), out var dataNascimento) ? dataNascimento : DateTime.MinValue,
-                    Email = row["Email1"].ToString(),
-                    Telefone = row["Telefone1"].ToString(),
-                    DataInscricao = DateTime.TryParse(row["Data_Inscricao"]?.ToString(), out var dataInscricao) ? dataInscricao : DateTime.MinValue,
-                    DataInscricaoRowId = DateTime.TryParse(row["Data_Inscricaorowid"]?.ToString(), out var dataInscricaoRowId) ? dataInscricaoRowId : DateTime.MinValue
+                    Id = row["id"].ToString(),
+                    DateEntered = DateTime.TryParse(row["date_entered"]?.ToString(), out var dateEntered) ? dateEntered : DateTime.MinValue,
+                    DateModified = DateTime.TryParse(row["date_modified"]?.ToString(), out var dateModified) ? dateModified : DateTime.MinValue,
+                    ModifiedUserId = row["modified_user_id"].ToString(),
+                    Description = row["description"].ToString(),
+                    Deleted = row["deleted"].ToString(),
+                    EmailAddress = row["email_address"].ToString(),
+                    NomeCompleto = row["nome_completo"].ToString(),
+                    Phone = row["phone"].ToString(),
+                    LeadSource = row["lead_source"].ToString(),
+                    LeadSourceDescription = row["lead_source_description"].ToString(),
+                    Status = row["status"].ToString(),
+                    StatusDescription = row["status_description"].ToString()
                 }).ToList();
 
-                Connect.HTlocalConnect.ConnEnd();
-
-                foreach (var inscricao in inscricoes)
+                foreach (var lead in leads)
                 {
-                    Relatorio relatorioFinal = new Relatorio()
+                    if (string.IsNullOrEmpty(lead.NomeCompleto) || string.IsNullOrEmpty(lead.EmailAddress))
+                        continue;
+
+                    RelatorioLead relatorioLead = new RelatorioLead()
                     {
-                        NomeFormador = inscricao.NomeAbreviado,
-                        EmailFormador = inscricao.Email,
-                        Telemovel = inscricao.Telefone
+                        NomeLead = lead.NomeCompleto,
+                        EmailLead = lead.EmailAddress,
+                        TelefoneLead = lead.Phone
                     };
-
-                    var client = new HttpClient();
-                    client.Timeout = TimeSpan.FromSeconds(60); // timeout
-
-                    // Construir a requisição
-                    var request = new HttpRequestMessage(HttpMethod.Post, "http://192.168.1.213:8080/api/egoi/adicionar-contato"); // producao
-                    ////var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:5141/api/egoi/adicionar-contato"); // Ambiente Teste
-
-                    // Formatação do telefone para o formato necessário (se ainda não estiver no formato 351-xxxxxxxxx)
-                    string formattedPhone = inscricao.Telefone;
-                    if (!string.IsNullOrEmpty(formattedPhone))
-                    {
-                        // Remover caracteres não numéricos
-                        formattedPhone = Regex.Replace(formattedPhone, @"[^\d]", "");
-                        
-                        // Adicionar prefixo se não começar com 351
-                        if (!formattedPhone.StartsWith("351"))
-                            formattedPhone = "351" + formattedPhone;
-                        
-                        // Formato final 351-xxxxxxxxx
-                        formattedPhone = formattedPhone.Insert(3, "-");
-                    }
-
-                    // Preparar data de nascimento no formato correto
-                    string birthDate = inscricao.DataNascimento.ToString("yyyy-MM-dd");
-
-                    var content = new StringContent(
-                        JsonConvert.SerializeObject(new
-                        {
-                            @base = new
-                            {
-                                status = "active",
-                                first_name = inscricao.NomeAbreviado,
-                                birth_date = birthDate,
-                                email = inscricao.Email,
-                                cellphone = formattedPhone,
-                                phone = formattedPhone
-                            },
-                            listid = 1, // 1 - Lista do Instituto CRIAP / 2 - Lista do Business
-                            tagid = 7,   // Tag HT
-                            referrer = new
-                            {
-                                referrer = "HT"
-                            }
-                        }),
-                        Encoding.UTF8,
-                        "application/json"
-                    );
-
-                    request.Content = content;
-
-                    // Enviar a requisição e obter a resposta
-                    var response = await client.SendAsync(request);
-
-                    // Ler o conteúdo da resposta
-                    var responseContent = await response.Content.ReadAsStringAsync();
 
                     try
                     {
+                        // Chamar API de validação
+                        var client = new HttpClient();
+                        client.Timeout = TimeSpan.FromSeconds(60);
+
+                        // Configurar autenticação Basic Auth
+                        var credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes("informatica.admin:xSyNN85kann#02X"));
+                        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
+
+                        var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:5141/api/formando/verificar-cadastro-ht"); // teste
+
+                        var requestContent = new
+                        {
+                            nome_completo = lead.NomeCompleto,
+                            email_address = lead.EmailAddress,
+                            phone = lead.Phone
+                        };
+
+                        var content = new StringContent(
+                            JsonConvert.SerializeObject(requestContent),
+                            Encoding.UTF8,
+                            "application/json"
+                        );
+
+                        request.Content = content;
+
+                        // Enviar requisição
+                        var response = await client.SendAsync(request);
+                        var responseContent = await response.Content.ReadAsStringAsync();
+
                         if (response.IsSuccessStatusCode)
                         {
-                            // Deserializar o retorno da API
-                            var egoiResponse = JsonConvert.DeserializeObject<EgoiApiResponse>(responseContent);
-
-                            // Adicionar detalhes da resposta ao relatório com ContactId
-                            relatorioFinal.ApiEgoiResponse = $"Sucesso (ContactId: {egoiResponse?.ContactId ?? "N/A"})";
-
-                            if (!string.IsNullOrEmpty(egoiResponse?.ContactId))
+                            try
                             {
-                                RegistraLog(inscricao.CodigoFormando.ToString(),
-                                    $"Importando formando para o Egoi. ContactId: {egoiResponse.ContactId}",
-                                    "Importacao Egoi", "egoi");
+                                var apiResponse = JsonConvert.DeserializeObject<ValidacaoHtApiResponse>(responseContent);
+                                
+                                if (apiResponse != null && !string.IsNullOrEmpty(apiResponse.Resultado))
+                                {
+                                    // Atualizar lead no CRM
+                                    string updateQuery = @"
+                                        UPDATE leads 
+                                        SET status_description = @status_description,
+                                            modified_user_id = '60fbbaec-ad35-8fef-c1d1-6479ab72ef54',
+                                            date_modified = NOW()
+                                        WHERE id = @lead_id";
+
+                                    MySqlCommand updateCmd = new MySqlCommand(updateQuery, Connect.CRMConnect.Conn);
+                                    updateCmd.Parameters.AddWithValue("@status_description", apiResponse.Resultado);
+                                    updateCmd.Parameters.AddWithValue("@lead_id", lead.Id);
+                                    updateCmd.ExecuteNonQuery();
+
+                                    relatorioLead.ValidacaoResponse = $"Sucesso: {apiResponse.Resultado}";
+                                }
+                                else
+                                {
+                                    relatorioLead.ValidacaoResponse = "Resposta da API inválida";
+                                }
+                            }
+                            catch (JsonException ex)
+                            {
+                                relatorioLead.ValidacaoResponse = $"Erro ao processar resposta: {ex.Message}";
                             }
                         }
                         else
                         {
-                            // Adicionar detalhes da resposta ao relatório com mensagem de erro
-                            relatorioFinal.ApiEgoiResponse = $"Erro: {responseContent}";
-
-                            RegistraLog(inscricao.CodigoFormando.ToString(),
-                                $"Erro ao importar para o Egoi: {responseContent}",
-                                "Importacao Egoi", "egoi");
+                            relatorioLead.ValidacaoResponse = $"Erro API: {response.StatusCode} - {responseContent}";
                         }
 
-                        listFormadoresNotificados.Add(relatorioFinal);
+                        listLeadsValidados.Add(relatorioLead);
                     }
-                    catch (JsonException ex)
+                    catch (Exception ex)
                     {
-                        // Em caso de erro na deserialização, registrar o erro
-                        string errorMessage = $"Erro ao processar resposta da API: {ex.Message}. Resposta: {responseContent}";
-                        RegistraLog(inscricao.CodigoFormando.ToString(), errorMessage, "Importacao Egoi Erro", "egoi");
-
-                        relatorioFinal.ApiEgoiResponse = "Erro ao processar resposta";
-                        listFormadoresNotificados.Add(relatorioFinal);
-
-                        if (!response.IsSuccessStatusCode)
-                        {
-                            sendEmail($"Erro ao chamar a API: {response.StatusCode}. Detalhes: {responseContent}",
-                                Settings.Default.emailenvio, true, "informatica", "");
-                        }
+                        relatorioLead.ValidacaoResponse = $"Erro: {ex.Message}";
+                        listLeadsValidados.Add(relatorioLead);
                     }
                 }
 
-                sendEmailRelatorio();
+                // Salvar log de controle da rotina
+                string insertLogQuery = @"
+                    INSERT INTO log_controle_rotina (nome_rotina, ultima_data_execucao) 
+                    VALUES ('rotina_validacao_ht_crm', @data_inicio)
+                    ON DUPLICATE KEY UPDATE ultima_data_execucao = @data_inicio";
+
+                MySqlCommand insertLogCmd = new MySqlCommand(insertLogQuery, Connect.CRMConnect.Conn);
+                insertLogCmd.Parameters.AddWithValue("@data_inicio", dataInicio);
+                insertLogCmd.ExecuteNonQuery();
+
+                Connect.CRMConnect.ConnEnd();
+
+                // Enviar relatório por email
+                sendEmailRelatorioLeads();
             }
             catch (Exception ex)
             {
-                sendEmail(ex.ToString(), Settings.Default.emailenvio, true, "informatica", "");
+                sendEmail($"Erro na rotina de validação de leads: {ex.ToString()}", Settings.Default.emailenvio, true, "informatica", "");
             }
         }
 
-        
-        private void sendEmailRelatorio()
+
+
+        private void sendEmailRelatorioLeads()
         {
             NetworkCredential basicCredential = new NetworkCredential(Settings.Default.emailenvio, Settings.Default.passwordemail);
             SmtpClient client = new SmtpClient();
@@ -251,19 +262,27 @@ namespace RotinaIntegracaoCRMvalidaHt
             string body = "";
 
             // Mostra relatório
-            if (listFormadoresNotificados != null && listFormadoresNotificados.Count > 0)
-            {
-                StringBuilder relatorio = new StringBuilder();
-                relatorio.AppendLine("Relatório de Importação de contatos HT para o Egoi (Alunos - Inscrições):<br><br>");
+            StringBuilder relatorio = new StringBuilder();
+            relatorio.AppendLine("Relatório de Validação de Leads CRM com HT:<br>");
+            relatorio.AppendLine($"<b>Período processado:</b> {periodoInicio:dd/MM/yyyy HH:mm:ss} até {periodoFim:dd/MM/yyyy HH:mm:ss}<br><br>");
 
-                foreach (var relFormador in listFormadoresNotificados)
+            if (listLeadsValidados != null && listLeadsValidados.Count > 0)
+            {
+                relatorio.AppendLine($"<b>Total de leads processados:</b> {listLeadsValidados.Count}<br><br>");
+
+                foreach (var relLead in listLeadsValidados)
                 {
-                    relatorio.AppendLine($"<b>Incrição (Aluno):</b> {relFormador.NomeFormador}  |  Email: {relFormador.EmailFormador} |  ApiEgoi: {relFormador.ApiEgoiResponse}<br>");
+                    relatorio.AppendLine($"<b>Lead:</b> {relLead.NomeLead}  |  Email: {relLead.EmailLead} |  Telefone: {relLead.TelefoneLead} |  Validação: {relLead.ValidacaoResponse}<br>");
                 }
-                body = relatorio.ToString();
             }
+            else
+            {
+                relatorio.AppendLine("Nenhum lead foi encontrado no período especificado.<br>");
+            }
+            
+            body = relatorio.ToString();
            
-            mm.Subject = "Instituto CRIAP || Relatório - Importação de contatos HT para o Egoi (Alunos - Inscrições)" + data;
+            mm.Subject = "Instituto CRIAP || Relatório - Validação de Leads CRM com HT" + data;
             mm.BodyEncoding = UTF8Encoding.UTF8;
             mm.IsBodyHtml = true;
             mm.DeliveryNotificationOptions = DeliveryNotificationOptions.OnFailure;
@@ -271,7 +290,7 @@ namespace RotinaIntegracaoCRMvalidaHt
             client.Send(mm);
         }
 
-        private void sendEmail(string body, string tecnica = "", bool error = false, string emailPessoa = "", string temp = "", Formador acao = null, List<Attachment> attachments = null, string coordenadorEmail="")
+        private void sendEmail(string body, string tecnica = "", bool error = false, string emailPessoa = "", string temp = "")
         {
             NetworkCredential basicCredential = new NetworkCredential(Settings.Default.emailenvio, Settings.Default.passwordemail);
             SmtpClient client = new SmtpClient();
@@ -284,18 +303,7 @@ namespace RotinaIntegracaoCRMvalidaHt
             MailMessage mm = new MailMessage();
             mm.From = new MailAddress("Instituto CRIAP <" + Settings.Default.emailenvio + "> ");
 
-            if (!error)
-            {
-                if (!teste)
-                {
-                    mm.CC.Add("informatica@criap.com");   
-                }
-                else
-                {
-                    mm.To.Add("raphaelcastro@criap.com");
-                }
-            }
-            else if (!teste)
+            if (!teste)
             {
                 mm.To.Add("informatica@criap.com");
             }
@@ -304,13 +312,12 @@ namespace RotinaIntegracaoCRMvalidaHt
                 mm.To.Add("raphaelcastro@criap.com");
             }
 
-            mm.Subject = (!teste) ? "Importação HT para o Egoi  / " : data + " TESTE - Importação HT para o Egoi - Aluno // ";
+            mm.Subject = (!teste) ? "Instituto CRIAP || Erro - Validação de Leads CRM" : data + " TESTE - Erro - Validação de Leads CRM";
 
             mm.BodyEncoding = UTF8Encoding.UTF8;
             mm.IsBodyHtml = true;
             mm.DeliveryNotificationOptions = DeliveryNotificationOptions.OnFailure;
             mm.Body = body + "<br> " + temp + (teste ? versao : "");
-
 
             client.Send(mm);
         }
