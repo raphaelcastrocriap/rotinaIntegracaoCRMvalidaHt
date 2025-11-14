@@ -1,14 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
-using System.Windows.Forms;
 using System.Data.SqlClient;
-using MySql.Data.MySqlClient;
 using System.Net.Mail;
 using System.Net;
 using System.Text;
 using System.Reflection;
 using System.Linq;
+using System.Windows.Forms;
 using RotinaIntegracaoCRMvalidaHt.Properties;
 using RotinaIntegracaoCRMvalidaHt.Connects;
 using System.Net.Http;
@@ -26,9 +24,7 @@ namespace RotinaIntegracaoCRMvalidaHt
         public string data;
         public string versao;
         
-        List<RelatorioLead> listLeadsValidados = new List<RelatorioLead>();
-        DateTime periodoInicio;
-        DateTime periodoFim;
+        string relatorioHtml = "";
 
         
         public Form1()
@@ -38,7 +34,7 @@ namespace RotinaIntegracaoCRMvalidaHt
         }
         private async void Form1_Load(object sender, EventArgs e)
         {
-            teste = true;
+            teste = false;
 
             Security.remote();
             Version v = Assembly.GetExecutingAssembly().GetName().Version;
@@ -68,170 +64,61 @@ namespace RotinaIntegracaoCRMvalidaHt
         {
             try
             {
-                // Data de início da rotina
-                DateTime dataInicio = DateTime.Now;
+                // Chamar API de validação de leads
+                var client = new HttpClient();
+                client.Timeout = TimeSpan.FromMinutes(5); // Timeout maior para processamento
 
-                Connect.CRMConnect.ConnInit();
+                var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:5141/api/crm/validar-leads-ht"); // teste
+                //var request = new HttpRequestMessage(HttpMethod.Post, "http://192.168.1.213:8080/api/crm/validar-leads-ht"); // teste
 
-                // Query para buscar a última data de execução
-                string queryUltimaExecucao = @"
-                    SELECT MAX(ultima_data_execucao) AS ultima_data_execucao 
-                    FROM log_controle_rotina 
-                    WHERE nome_rotina = 'rotina_validacao_ht_crm'";
-
-                MySqlCommand cmdUltimaExecucao = new MySqlCommand(queryUltimaExecucao, Connect.CRMConnect.Conn);
-                object result = cmdUltimaExecucao.ExecuteScalar();
-                
-                DateTime ultimaExecucao = result != null && result != DBNull.Value 
-                    ? Convert.ToDateTime(result) 
-                    : DateTime.Now.AddDays(-30); // Se não houver registro, buscar últimos 30 dias
-
-                // Armazenar o período para o relatório
-                periodoInicio = ultimaExecucao;
-                periodoFim = dataInicio;
-
-                // Query para buscar leads novos/modificados
-                string queryLeads = $@"
-                    SELECT l.id, l.date_entered, l.date_modified, l.modified_user_id, l.description, l.deleted, 
-                           ea.email_address, CONCAT_WS(' ', l.first_name, l.last_name) AS nome_completo, 
-                           COALESCE(l.phone_mobile, l.phone_home, l.phone_work) AS phone, l.lead_source, 
-                           l.lead_source_description, l.status, l.status_description
-                    FROM leads l
-                    LEFT JOIN email_addr_bean_rel ebr ON ebr.bean_id = l.id AND ebr.bean_module = 'Leads'
-                    LEFT JOIN email_addresses ea ON ea.id = ebr.email_address_id
-                    WHERE l.deleted = 0 
-                      AND l.date_entered >= '{ultimaExecucao:yyyy-MM-dd HH:mm:ss}' 
-                      AND l.date_entered <= '{dataInicio:yyyy-MM-dd HH:mm:ss}'";
-
-                MySqlDataAdapter adapterLeads = new MySqlDataAdapter(queryLeads, Connect.CRMConnect.Conn);
-                DataTable dataTableLeads = new DataTable();
-                adapterLeads.Fill(dataTableLeads);
-
-                var leads = dataTableLeads.AsEnumerable().Select(row => new Lead
+                var requestContent = new
                 {
-                    Id = row["id"].ToString(),
-                    DateEntered = DateTime.TryParse(row["date_entered"]?.ToString(), out var dateEntered) ? dateEntered : DateTime.MinValue,
-                    DateModified = DateTime.TryParse(row["date_modified"]?.ToString(), out var dateModified) ? dateModified : DateTime.MinValue,
-                    ModifiedUserId = row["modified_user_id"].ToString(),
-                    Description = row["description"].ToString(),
-                    Deleted = row["deleted"].ToString(),
-                    EmailAddress = row["email_address"].ToString(),
-                    NomeCompleto = row["nome_completo"].ToString(),
-                    Phone = row["phone"].ToString(),
-                    LeadSource = row["lead_source"].ToString(),
-                    LeadSourceDescription = row["lead_source_description"].ToString(),
-                    Status = row["status"].ToString(),
-                    StatusDescription = row["status_description"].ToString()
-                }).ToList();
+                    data_referencia = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                };
 
-                foreach (var lead in leads)
+                var content = new StringContent(
+                    JsonConvert.SerializeObject(requestContent),
+                    Encoding.UTF8,
+                    "application/json"
+                );
+
+                request.Content = content;
+
+                // Enviar requisição
+                var response = await client.SendAsync(request);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
                 {
-                    if (string.IsNullOrEmpty(lead.NomeCompleto) || string.IsNullOrEmpty(lead.EmailAddress))
-                        continue;
-
-                    RelatorioLead relatorioLead = new RelatorioLead()
-                    {
-                        NomeLead = lead.NomeCompleto,
-                        EmailLead = lead.EmailAddress,
-                        TelefoneLead = lead.Phone
-                    };
-
                     try
                     {
-                        // Chamar API de validação
-                        var client = new HttpClient();
-                        client.Timeout = TimeSpan.FromSeconds(60);
-
-                        // Configurar autenticação Basic Auth
-                        var credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes("informatica.admin:xSyNN85kann#02X"));
-                        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
-
-                        var request = new HttpRequestMessage(HttpMethod.Post, "http://localhost:5141/api/formando/verificar-cadastro-ht"); // teste
-
-                        var requestContent = new
+                        var apiResponse = JsonConvert.DeserializeObject<dynamic>(responseContent);
+                        
+                        if (apiResponse?.relatorio_html != null)
                         {
-                            nome_completo = lead.NomeCompleto,
-                            email_address = lead.EmailAddress,
-                            phone = lead.Phone
-                        };
-
-                        var content = new StringContent(
-                            JsonConvert.SerializeObject(requestContent),
-                            Encoding.UTF8,
-                            "application/json"
-                        );
-
-                        request.Content = content;
-
-                        // Enviar requisição
-                        var response = await client.SendAsync(request);
-                        var responseContent = await response.Content.ReadAsStringAsync();
-
-                        if (response.IsSuccessStatusCode)
-                        {
-                            try
-                            {
-                                var apiResponse = JsonConvert.DeserializeObject<ValidacaoHtApiResponse>(responseContent);
-                                
-                                if (apiResponse != null && !string.IsNullOrEmpty(apiResponse.Resultado))
-                                {
-                                    // Atualizar lead no CRM
-                                    string updateQuery = @"
-                                        UPDATE leads 
-                                        SET status_description = @status_description,
-                                            modified_user_id = '60fbbaec-ad35-8fef-c1d1-6479ab72ef54',
-                                            date_modified = NOW()
-                                        WHERE id = @lead_id";
-
-                                    MySqlCommand updateCmd = new MySqlCommand(updateQuery, Connect.CRMConnect.Conn);
-                                    updateCmd.Parameters.AddWithValue("@status_description", apiResponse.Resultado);
-                                    updateCmd.Parameters.AddWithValue("@lead_id", lead.Id);
-                                    updateCmd.ExecuteNonQuery();
-
-                                    relatorioLead.ValidacaoResponse = $"Sucesso: {apiResponse.Resultado}";
-                                }
-                                else
-                                {
-                                    relatorioLead.ValidacaoResponse = "Resposta da API inválida";
-                                }
-                            }
-                            catch (JsonException ex)
-                            {
-                                relatorioLead.ValidacaoResponse = $"Erro ao processar resposta: {ex.Message}";
-                            }
+                            relatorioHtml = apiResponse.relatorio_html.ToString();
+                            
+                            // Enviar relatório por email
+                            sendEmailRelatorioLeads();
                         }
                         else
                         {
-                            relatorioLead.ValidacaoResponse = $"Erro API: {response.StatusCode} - {responseContent}";
+                            sendEmail("Erro: Resposta da API não contém o relatório HTML esperado.", "", true, "", "");
                         }
-
-                        listLeadsValidados.Add(relatorioLead);
                     }
-                    catch (Exception ex)
+                    catch (JsonException ex)
                     {
-                        relatorioLead.ValidacaoResponse = $"Erro: {ex.Message}";
-                        listLeadsValidados.Add(relatorioLead);
+                        sendEmail($"Erro ao processar resposta da API: {ex.Message}. Resposta: {responseContent}", "", true, "", "");
                     }
                 }
-
-                // Salvar log de controle da rotina
-                string insertLogQuery = @"
-                    INSERT INTO log_controle_rotina (nome_rotina, ultima_data_execucao) 
-                    VALUES ('rotina_validacao_ht_crm', @data_inicio)
-                    ON DUPLICATE KEY UPDATE ultima_data_execucao = @data_inicio";
-
-                MySqlCommand insertLogCmd = new MySqlCommand(insertLogQuery, Connect.CRMConnect.Conn);
-                insertLogCmd.Parameters.AddWithValue("@data_inicio", dataInicio);
-                insertLogCmd.ExecuteNonQuery();
-
-                Connect.CRMConnect.ConnEnd();
-
-                // Enviar relatório por email
-                sendEmailRelatorioLeads();
+                else
+                {
+                    sendEmail($"Erro na API de validação: {response.StatusCode} - {responseContent}", "", true, "", "");
+                }
             }
             catch (Exception ex)
             {
-                sendEmail($"Erro na rotina de validação de leads: {ex.ToString()}", Settings.Default.emailenvio, true, "informatica", "");
+                sendEmail($"Erro na rotina de validação de leads: {ex.ToString()}", "", true, "", "");
             }
         }
 
@@ -252,41 +139,17 @@ namespace RotinaIntegracaoCRMvalidaHt
             if (!teste)
             {
                 mm.To.Add("informatica@criap.com");
-                mm.To.Add("brunaarouca@criap.com");
             }
             else
             {
                 mm.To.Add("raphaelcastro@criap.com");
             }
-            
-            string body = "";
-
-            // Mostra relatório
-            StringBuilder relatorio = new StringBuilder();
-            relatorio.AppendLine("Relatório de Validação de Leads CRM com HT:<br>");
-            relatorio.AppendLine($"<b>Período processado:</b> {periodoInicio:dd/MM/yyyy HH:mm:ss} até {periodoFim:dd/MM/yyyy HH:mm:ss}<br><br>");
-
-            if (listLeadsValidados != null && listLeadsValidados.Count > 0)
-            {
-                relatorio.AppendLine($"<b>Total de leads processados:</b> {listLeadsValidados.Count}<br><br>");
-
-                foreach (var relLead in listLeadsValidados)
-                {
-                    relatorio.AppendLine($"<b>Lead:</b> {relLead.NomeLead}  |  Email: {relLead.EmailLead} |  Telefone: {relLead.TelefoneLead} |  Validação: {relLead.ValidacaoResponse}<br>");
-                }
-            }
-            else
-            {
-                relatorio.AppendLine("Nenhum lead foi encontrado no período especificado.<br>");
-            }
-            
-            body = relatorio.ToString();
            
-            mm.Subject = "Instituto CRIAP || Relatório - Validação de Leads CRM com HT" + data;
+            mm.Subject = "Instituto CRIAP || Relatório - Validação de Leads CRM com validação do HT";
             mm.BodyEncoding = UTF8Encoding.UTF8;
             mm.IsBodyHtml = true;
             mm.DeliveryNotificationOptions = DeliveryNotificationOptions.OnFailure;
-            mm.Body = body + "<br> " + versao;
+            mm.Body = relatorioHtml + "<br><br>" + versao;
             client.Send(mm);
         }
 
